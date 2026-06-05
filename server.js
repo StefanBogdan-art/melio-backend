@@ -107,6 +107,22 @@ Dacă nu găsești data pune azi + 7 zile.` }
 // ─── Health check ─────────────────────────────────────────────────────────────
 app.get("/api/health", (req, res) => res.json({ status: "ok", time: new Date() }));
 
+
+// ── Keep-alive: ping la fiecare 14 minute ca sa nu adoarma pe Render ──────────
+const https = require('https');
+const RENDER_URL = process.env.RENDER_EXTERNAL_URL || '';
+
+if (RENDER_URL) {
+  setInterval(() => {
+    https.get(RENDER_URL + '/api/health', (res) => {
+      console.log('Keep-alive ping:', res.statusCode);
+    }).on('error', (e) => {
+      console.log('Keep-alive error:', e.message);
+    });
+  }, 14 * 60 * 1000); // 14 minute
+  console.log('Keep-alive activ pentru:', RENDER_URL);
+}
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`✅ Melio API pornit pe http://localhost:${PORT}`);
