@@ -20,7 +20,7 @@ app.post("/api/retete", async (req, res) => {
       return res.status(400).json({ error: "Lista ingrediente lipsă." });
 
     const prompt = prompt_override || `Ești chef culinar român. Utilizatorul are: ${ingrediente.join(", ")}.
-Generează 15 rețete REALE care folosesc aceste ingrediente logic (nu combina lapte cu ceapă aiurea).
+Generează 10 rețete REALE care folosesc aceste ingrediente logic (nu combina lapte cu ceapă aiurea).
 Corectează greșelile de scriere.
 Răspunde DOAR JSON:
 {
@@ -30,7 +30,7 @@ Răspunde DOAR JSON:
 
     const message = await client.messages.create({
       model: "claude-sonnet-4-5",
-      max_tokens: 6000,
+      max_tokens: 4000,
       messages: [{ role: "user", content: prompt }],
     });
 
