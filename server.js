@@ -20,7 +20,7 @@ app.post("/api/retete", async (req, res) => {
       return res.status(400).json({ error: "Lista ingrediente lipsă." });
 
     const prompt = prompt_override || `Ești chef culinar român. Utilizatorul are: ${ingrediente.join(", ")}.
-Generează 10 rețete REALE care folosesc aceste ingrediente logic (nu combina lapte cu ceapă aiurea).
+Generează 15 rețete REALE care folosesc aceste ingrediente logic (nu combina lapte cu ceapă aiurea).
 Corectează greșelile de scriere.
 Răspunde DOAR JSON:
 {
