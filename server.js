@@ -143,24 +143,24 @@ app.post("/api/retete", rateLimit, async (req, res) => {
       return res.status(400).json({ error: "Lista ingrediente lipsă." });
 
     const prompt = prompt_override || `Ești chef culinar român. Utilizatorul are: ${ingrediente.join(", ")}.
-Generează 10 rețete REALE care folosesc aceste ingrediente logic (nu combina lapte cu ceapă aiurea).
-Corectează greșelile de scriere din lista de ingrediente.
+Generează exact 10 rețete REALE și SCURTE. Fiecare rețetă maxim 3 pași scurți.
+Corectează greșelile de scriere.
 
-Răspunde DOAR cu JSON valid:
+IMPORTANT: Răspunde DOAR cu JSON valid, fără text extra:
 {
-  "ingrediente_corectate": [{"original": "...", "corectat": "...", "emoji": "🥕"}],
+  "ingrediente_corectate": [{"original": "x", "corectat": "x", "emoji": "🥕"}],
   "retete": [
     {
-      "nume": "Nume rețetă",
-      "timp": "30 min",
+      "nume": "Nume",
+      "timp": "20 min",
       "dificultate": "Ușor",
       "calorii": 350,
       "proteine": 20,
       "carbohidrati": 30,
       "grasimi": 15,
-      "ingrediente_folosite": ["ing1", "ing2"],
-      "ingrediente_complete": ["ing1 - cantitate", "ing2 - cantitate"],
-      "pasi": ["Pasul 1...", "Pasul 2..."]
+      "ingrediente_folosite": ["ing1"],
+      "ingrediente_complete": ["ing1 - 200g"],
+      "pasi": ["Pas 1.", "Pas 2.", "Pas 3."]
     }
   ]
 }`;
@@ -168,7 +168,7 @@ Răspunde DOAR cu JSON valid:
     const message = await Promise.race([
       client.messages.create({
         model: "claude-sonnet-4-6",
-        max_tokens: 3000,
+        max_tokens: 8000,
         messages: [{ role: "user", content: prompt }]
       }),
       new Promise((_, reject) => 
