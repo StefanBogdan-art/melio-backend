@@ -67,9 +67,19 @@ app.post("/api/analizeaza-bon", rateLimit, upload.single("bon"), async (req, res
   try {
     if (!req.file) return res.status(400).json({ error: "Nicio imagine trimisă." });
 
-    const mediaType = req.file.mimetype || "image/jpeg";
+    let mediaType = req.file.mimetype || "image/jpeg";
     const isPDF = mediaType === "application/pdf";
     const base64Data = req.file.buffer.toString("base64");
+    
+    // Normalizeaza media type - galeria poate trimite octet-stream
+    if (!isPDF) {
+      if (mediaType === "application/octet-stream" || !mediaType.startsWith("image/")) {
+        mediaType = "image/jpeg";
+      }
+      // Accepta doar tipurile suportate de Claude
+      const supported = ["image/jpeg", "image/png", "image/gif", "image/webp"];
+      if (!supported.includes(mediaType)) mediaType = "image/jpeg";
+    }
 
     const promptText = `Ești expert în citirea bonurilor de casă românești.
 Analizează cu ATENȚIE MAXIMĂ acest bon și extrage TOATE produsele alimentare.
@@ -87,10 +97,12 @@ Răspunde DOAR cu JSON valid, fără text adițional:
 
     let messageContent;
 
+    // Intotdeauna trimite ca imagine - mai compatibil
+    // PDF-urile sunt convertite vizual de Claude daca sunt trimise ca document
     if (isPDF) {
       messageContent = [
         {
-          type: "document",
+          type: "document", 
           source: { type: "base64", media_type: "application/pdf", data: base64Data }
         },
         { type: "text", text: promptText }
@@ -115,8 +127,11 @@ Răspunde DOAR cu JSON valid, fără text adițional:
     const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
     res.json(parsed);
   } catch (err) {
-    console.error("❌ /api/analizeaza-bon:", err.message);
-    res.status(500).json({ error: err.message });
+    console.error("❌ /api/analizeaza-bon:", err.message, err.status, JSON.stringify(err.error || {}));
+    res.status(500).json({ 
+      error: err.message,
+      details: err.error?.message || null
+    });
   }
 });
 
