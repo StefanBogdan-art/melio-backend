@@ -165,11 +165,16 @@ Răspunde DOAR cu JSON valid:
   ]
 }`;
 
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-5",
-      max_tokens: 4000,
-      messages: [{ role: "user", content: prompt }]
-    });
+    const message = await Promise.race([
+      client.messages.create({
+        model: "claude-sonnet-4-5",
+        max_tokens: 3000,
+        messages: [{ role: "user", content: prompt }]
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error("Server timeout dupa 75 secunde")), 75000)
+      )
+    ]);
 
     const text = message.content.map(b => b.text || "").join("");
     const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
