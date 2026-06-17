@@ -118,7 +118,7 @@ Răspunde DOAR cu JSON valid, fără text adițional:
     }
 
     const message = await client.messages.create({
-      model: "claude-sonnet-4-5",
+      model: "claude-sonnet-4-6",
       max_tokens: 800,
       messages: [{ role: "user", content: messageContent }]
     });
@@ -167,7 +167,7 @@ Răspunde DOAR cu JSON valid:
 
     const message = await Promise.race([
       client.messages.create({
-        model: "claude-sonnet-4-5",
+        model: "claude-sonnet-4-6",
         max_tokens: 3000,
         messages: [{ role: "user", content: prompt }]
       }),
@@ -177,7 +177,28 @@ Răspunde DOAR cu JSON valid:
     ]);
 
     const text = message.content.map(b => b.text || "").join("");
-    const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
+    console.log("Raw response length:", text.length);
+    
+    let parsed;
+    try {
+      // Curata textul si parseaza JSON
+      let clean = text.replace(/```json/g, "").replace(/```/g, "").trim();
+      // Gaseste primul { si ultimul }
+      const start = clean.indexOf('{');
+      const end = clean.lastIndexOf('}');
+      if (start === -1 || end === -1) throw new Error("Nu s-a gasit JSON in raspuns");
+      clean = clean.substring(start, end + 1);
+      parsed = JSON.parse(clean);
+    } catch(parseErr) {
+      console.error("❌ JSON parse error:", parseErr.message);
+      console.error("Text primit:", text.substring(0, 500));
+      return res.status(500).json({ error: "Eroare procesare raspuns AI: " + parseErr.message });
+    }
+    
+    if (!parsed.retete || !parsed.retete.length) {
+      return res.status(500).json({ error: "Nu s-au generat retete" });
+    }
+    
     res.json(parsed);
   } catch (err) {
     console.error("❌ /api/retete:", err.message);
@@ -190,7 +211,7 @@ app.post("/api/citeste-expirare", rateLimit, async (req, res) => {
   try {
     const { produs } = req.body;
     const message = await client.messages.create({
-      model: "claude-sonnet-4-5",
+      model: "claude-sonnet-4-6",
       max_tokens: 200,
       messages: [{
         role: "user",
