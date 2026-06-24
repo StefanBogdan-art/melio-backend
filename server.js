@@ -1,51 +1,39 @@
 const express = require("express");
 const cors = require("cors");
-const multer = require("multer");
 const Anthropic = require("@anthropic-ai/sdk");
-const https = require("https");
+const multer = require("multer");
+const sharp = require("sharp");
+require("dotenv").config();
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
 const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
 
-// ── CORS ──────────────────────────────────────────────────
 app.use(cors());
 app.use(express.json({ limit: "10mb" }));
 
-// ── SECURITATE: Secret header ─────────────────────────────
-const APP_SECRET = process.env.APP_SECRET || "melio-secret-2026";
-
-function appAuthCheck(req, res, next) {
-  const secret = req.headers["x-melio-key"] || req.body?.app_key;
-  if (secret !== APP_SECRET) {
-    return res.status(403).json({ error: "Acces interzis." });
-  }
-  next();
-}
-
-// ── SECURITATE: Rate limiting ─────────────────────────────
+// ─── RATE LIMITING (30 cereri/ora/IP) ─────────────────────────────────────────
 const requestCounts = {};
 const RATE_LIMIT = 30;
-const RATE_WINDOW = 60 * 60 * 1000;
+const RATE_WINDOW = 60 * 60 * 1000; // 1 ora
 
 function rateLimit(req, res, next) {
-  const ip = req.ip || req.connection.remoteAddress || "unknown";
+  const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || "unknown";
   const now = Date.now();
-  if (!requestCounts[ip]) {
-    requestCounts[ip] = { count: 1, resetAt: now + RATE_WINDOW };
-    return next();
+
+  if (!requestCounts[ip] || now > requestCounts[ip].resetAt) {
+    requestCounts[ip] = { count: 0, resetAt: now + RATE_WINDOW };
   }
-  if (now > requestCounts[ip].resetAt) {
-    requestCounts[ip] = { count: 1, resetAt: now + RATE_WINDOW };
-    return next();
-  }
+
   if (requestCounts[ip].count >= RATE_LIMIT) {
-    return res.status(429).json({ error: "Prea multe cereri. Încearcă mai târziu." });
+    return res.status(429).json({ error: "Prea multe cereri. Încearcă din nou mai târziu." });
   }
+
   requestCounts[ip].count++;
   next();
 }
 
+// Curata memory la fiecare ora
 setInterval(() => {
   const now = Date.now();
   Object.keys(requestCounts).forEach(ip => {
@@ -53,152 +41,88 @@ setInterval(() => {
   });
 }, RATE_WINDOW);
 
-// ── GET /api/health ───────────────────────────────────────
+// ─── CACHE RETETE (24h TTL, exact match) ──────────────────────────────────────
+const retetCache = new Map();
+const CACHE_TTL = 24 * 60 * 60 * 1000; // 24 ore
+
+function getCacheKey(ingrediente) {
+  return ingrediente.map(i => i.toLowerCase().trim()).sort().join("|");
+}
+
+// ─── HEALTH CHECK ──────────────────────────────────────────────────────────────
 app.get("/api/health", (req, res) => {
-  res.json({
-    status: "ok",
-    key: process.env.ANTHROPIC_API_KEY ? "configured" : "MISSING",
-    time: new Date().toISOString()
-  });
+  res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// ── POST /api/analizeaza-bon ──────────────────────────────
-app.post("/api/analizeaza-bon", rateLimit, upload.single("bon"), async (req, res) => {
-  try {
-    if (!req.file) return res.status(400).json({ error: "Nicio imagine trimisă." });
-
-    let mediaType = req.file.mimetype || "image/jpeg";
-    const isPDF = mediaType === "application/pdf";
-    const base64Data = req.file.buffer.toString("base64");
-    
-    // Normalizeaza media type - galeria poate trimite octet-stream
-    if (!isPDF) {
-      if (mediaType === "application/octet-stream" || !mediaType.startsWith("image/")) {
-        mediaType = "image/jpeg";
-      }
-      // Accepta doar tipurile suportate de Claude
-      const supported = ["image/jpeg", "image/png", "image/gif", "image/webp"];
-      if (!supported.includes(mediaType)) mediaType = "image/jpeg";
-    }
-
-    const promptText = `Ești expert în citirea bonurilor de casă românești.
-Analizează cu ATENȚIE MAXIMĂ acest bon și extrage TOATE produsele alimentare.
-
-REGULI STRICTE:
-1. Citește FIECARE linie din bon cu atenție
-2. Extrage DOAR alimentele (mâncare, băuturi, ingrediente)
-3. IGNORĂ complet: detergenți, săpun, șampon, pungi, hârtie igienică, cosmetice, ciment, cuie
-4. Scrie clar în română, corectează abrevierile (PM_Faina=Făină etc)
-5. Include și produsele cu reducere - sunt tot alimente
-6. Dacă un produs apare de mai multe ori, include-l O SINGURĂ DATĂ
-
-Răspunde DOAR cu JSON valid, fără text adițional:
-{"ingrediente": ["produs1", "produs2", ...]}`;
-
-    let messageContent;
-
-    // Intotdeauna trimite ca imagine - mai compatibil
-    // PDF-urile sunt convertite vizual de Claude daca sunt trimise ca document
-    if (isPDF) {
-      messageContent = [
-        {
-          type: "document", 
-          source: { type: "base64", media_type: "application/pdf", data: base64Data }
-        },
-        { type: "text", text: promptText }
-      ];
-    } else {
-      messageContent = [
-        {
-          type: "image",
-          source: { type: "base64", media_type: mediaType, data: base64Data }
-        },
-        { type: "text", text: promptText }
-      ];
-    }
-
-    const message = await client.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 800,
-      messages: [{ role: "user", content: messageContent }]
-    });
-
-    const text = message.content.map(b => b.text || "").join("");
-    const parsed = JSON.parse(text.replace(/```json|```/g, "").trim());
-    res.json(parsed);
-  } catch (err) {
-    console.error("❌ /api/analizeaza-bon:", err.message, err.status, JSON.stringify(err.error || {}));
-    res.status(500).json({ 
-      error: err.message,
-      details: err.error?.message || null
-    });
-  }
-});
-
-// ── POST /api/retete ──────────────────────────────────────
+// ─── POST /api/retete ──────────────────────────────────────────────────────────
 app.post("/api/retete", rateLimit, async (req, res) => {
   try {
-    const { ingrediente, prompt_override } = req.body;
+    const { ingrediente, force_new } = req.body;
     if (!ingrediente || !ingrediente.length)
       return res.status(400).json({ error: "Lista ingrediente lipsă." });
 
-    const prompt = prompt_override || `Ești chef culinar român. Utilizatorul are: ${ingrediente.join(", ")}.
-Generează exact 10 rețete REALE și SCURTE. Fiecare rețetă maxim 3 pași scurți.
-Corectează greșelile de scriere.
+    // Verificare cache (bypass daca force_new)
+    const cacheKey = getCacheKey(ingrediente);
+    if (!force_new && retetCache.has(cacheKey)) {
+      const cached = retetCache.get(cacheKey);
+      if (Date.now() < cached.expiresAt) {
+        console.log("✅ Cache hit:", cacheKey.substring(0, 50));
+        return res.json({ ...cached.data, fromCache: true });
+      } else {
+        retetCache.delete(cacheKey);
+      }
+    }
 
-IMPORTANT: Răspunde DOAR cu JSON valid, fără text extra:
+    const prompt = `Ești chef culinar român. Utilizatorul are aceste ingrediente disponibile: ${ingrediente.join(", ")}.
+
+Generează 10 rețete REALE și gustoase respectând aceste reguli:
+- Prioritizează combinații compatibile și logice din punct de vedere culinar
+- Nu forța toate ingredientele într-o singură rețetă dacă nu se potrivesc
+- Dacă unele ingrediente par incompatibile între ele (de ex. pepene cu muștar, sau fructe cu condimente savuroase), folosește-le în rețete separate, nu împreună
+- Fiecare rețetă poate folosi un subset al ingredientelor disponibile + ingrediente de bază comune (sare, ulei, apă, făină)
+- Corectează greșelile de scriere din lista de ingrediente
+- La finalul răspunsului JSON, adaugă câmpul "sugestie_completare" cu o sugestie scurtă despre ce ingredient comun ar completa cel mai bine combinația disponibilă
+
+Răspunde DOAR cu JSON valid, fără text înainte sau după:
 {
-  "ingrediente_corectate": [{"original": "x", "corectat": "x", "emoji": "🥕"}],
+  "ingrediente_corectate": [{"original":"...","corectat":"...","emoji":"..."}],
   "retete": [
     {
-      "nume": "Nume",
-      "timp": "20 min",
+      "nume": "...",
+      "ingrediente_folosite": ["..."],
+      "ingrediente_complete": ["..."],
+      "timp": "...",
       "dificultate": "Ușor",
-      "calorii": 350,
+      "calorii": 300,
       "proteine": 20,
       "carbohidrati": 30,
-      "grasimi": 15,
-      "ingrediente_folosite": ["ing1"],
-      "ingrediente_complete": ["ing1 - 200g"],
-      "pasi": ["Pas 1.", "Pas 2.", "Pas 3."]
+      "grasimi": 10,
+      "pasi": ["..."]
     }
-  ]
+  ],
+  "sugestie_completare": "Pentru a completa aceste ingrediente, ai putea adăuga ..."
 }`;
 
-    const message = await Promise.race([
-      client.messages.create({
-        model: "claude-sonnet-4-6",
-        max_tokens: 8000,
-        messages: [{ role: "user", content: prompt }]
-      }),
-      new Promise((_, reject) => 
-        setTimeout(() => reject(new Error("Server timeout dupa 75 secunde")), 75000)
-      )
-    ]);
+    const message = await client.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 8000,
+      messages: [{ role: "user", content: prompt }],
+    });
 
     const text = message.content.map(b => b.text || "").join("");
-    console.log("Raw response length:", text.length);
     
-    let parsed;
-    try {
-      // Curata textul si parseaza JSON
-      let clean = text.replace(/```json/g, "").replace(/```/g, "").trim();
-      // Gaseste primul { si ultimul }
-      const start = clean.indexOf('{');
-      const end = clean.lastIndexOf('}');
-      if (start === -1 || end === -1) throw new Error("Nu s-a gasit JSON in raspuns");
-      clean = clean.substring(start, end + 1);
-      parsed = JSON.parse(clean);
-    } catch(parseErr) {
-      console.error("❌ JSON parse error:", parseErr.message);
-      console.error("Text primit:", text.substring(0, 500));
-      return res.status(500).json({ error: "Eroare procesare raspuns AI: " + parseErr.message });
-    }
+    // Parser robust: gaseste primul { si ultimul }
+    const firstBrace = text.indexOf("{");
+    const lastBrace = text.lastIndexOf("}");
+    if (firstBrace === -1 || lastBrace === -1) throw new Error("Răspuns invalid de la AI.");
     
-    if (!parsed.retete || !parsed.retete.length) {
-      return res.status(500).json({ error: "Nu s-au generat retete" });
-    }
-    
+    const jsonText = text.substring(firstBrace, lastBrace + 1);
+    const parsed = JSON.parse(jsonText);
+
+    // Salveaza in cache
+    retetCache.set(cacheKey, { data: parsed, expiresAt: Date.now() + CACHE_TTL });
+    console.log("✅ /api/retete generat si cacheat:", ingrediente.length, "ingrediente");
+
     res.json(parsed);
   } catch (err) {
     console.error("❌ /api/retete:", err.message);
@@ -206,43 +130,129 @@ IMPORTANT: Răspunde DOAR cu JSON valid, fără text extra:
   }
 });
 
-// ── POST /api/citeste-expirare ────────────────────────────
-app.post("/api/citeste-expirare", rateLimit, async (req, res) => {
+// ─── POST /api/analizeaza-bon ──────────────────────────────────────────────────
+app.post("/api/analizeaza-bon", rateLimit, upload.single("bon"), async (req, res) => {
   try {
-    const { produs } = req.body;
+    if (!req.file) return res.status(400).json({ error: "Nicio imagine trimisă." });
+
+    const originalBuffer = req.file.buffer;
+    const originalMime = req.file.mimetype;
+
+    // Detectare PDF
+    const isPDF =
+      originalMime === "application/pdf" ||
+      (originalBuffer.length > 4 &&
+        originalBuffer[0] === 0x25 &&
+        originalBuffer[1] === 0x50 &&
+        originalBuffer[2] === 0x44 &&
+        originalBuffer[3] === 0x46);
+
+    if (isPDF) {
+      // PDF — trimis ca document block catre Claude
+      const base64PDF = originalBuffer.toString("base64");
+      const message = await client.messages.create({
+        model: "claude-sonnet-4-6",
+        max_tokens: 800,
+        messages: [
+          {
+            role: "user",
+            content: [
+              {
+                type: "document",
+                source: { type: "base64", media_type: "application/pdf", data: base64PDF },
+              },
+              {
+                type: "text",
+                text: `Ești un asistent care analizează bonuri fiscale românești.
+Citește FIECARE linie din acest bon și extrage DOAR produsele alimentare.
+Ignoră: servicii, taxe, TVA, totaluri, date, ora, CIF, număr bon, produse non-alimentare (detergenți, cosmetice, haine).
+Corectează abrevierile tipice de pe bonuri românești (ex: "UNT" → "unt", "PAINE" → "pâine").
+Răspunde DOAR cu JSON valid:
+{"produse": [{"nume": "...", "emoji": "..."}]}`,
+              },
+            ],
+          },
+        ],
+      });
+
+      const text = message.content.map(b => b.text || "").join("");
+      const firstBrace = text.indexOf("{");
+      const lastBrace = text.lastIndexOf("}");
+      if (firstBrace === -1) throw new Error("Răspuns invalid de la AI.");
+      const parsed = JSON.parse(text.substring(firstBrace, lastBrace + 1));
+      return res.json(parsed);
+    }
+
+    // IMAGINE (JPEG, PNG, WEBP, HEIC, HEIF, etc.)
+    // Convertim ORICE format la JPEG cu sharp — rezolva HEIC din camera si galerie
+    let imageBuffer = originalBuffer;
+    try {
+      imageBuffer = await sharp(originalBuffer).jpeg({ quality: 85 }).toBuffer();
+      console.log("✅ Sharp: imagine convertita la JPEG", originalMime, "→ image/jpeg");
+    } catch (sharpErr) {
+      console.warn("⚠️ Sharp conversion failed, folosesc originalul:", sharpErr.message);
+      // Continua cu buffer original — nu crapa aplicatia
+    }
+
+    const base64Image = imageBuffer.toString("base64");
+
     const message = await client.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 200,
-      messages: [{
-        role: "user",
-        content: `Câte zile rezistă "${produs}" în frigider după deschidere? Răspunde DOAR cu numărul de zile (ex: 7).`
-      }]
+      max_tokens: 800,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: { type: "base64", media_type: "image/jpeg", data: base64Image },
+            },
+            {
+              type: "text",
+              text: `Ești un asistent care analizează bonuri fiscale românești.
+Citește FIECARE linie din acest bon și extrage DOAR produsele alimentare.
+Ignoră: servicii, taxe, TVA, totaluri, date, ora, CIF, număr bon, produse non-alimentare (detergenți, cosmetice, haine).
+Corectează abrevierile tipice de pe bonuri românești (ex: "UNT" → "unt", "PAINE" → "pâine").
+Răspunde DOAR cu JSON valid:
+{"produse": [{"nume": "...", "emoji": "..."}]}`,
+            },
+          ],
+        },
+      ],
     });
-    const zile = parseInt(message.content[0].text.trim()) || 7;
-    res.json({ zile });
+
+    const text = message.content.map(b => b.text || "").join("");
+    const firstBrace = text.indexOf("{");
+    const lastBrace = text.lastIndexOf("}");
+    if (firstBrace === -1) throw new Error("Răspuns invalid de la AI.");
+    const parsed = JSON.parse(text.substring(firstBrace, lastBrace + 1));
+
+    console.log("✅ /api/analizeaza-bon:", parsed.produse?.length || 0, "produse extrase");
+    res.json(parsed);
   } catch (err) {
+    console.error("❌ /api/analizeaza-bon:", err.message);
     res.status(500).json({ error: err.message });
   }
 });
 
-// ── KEEP ALIVE ────────────────────────────────────────────
-const RENDER_URL = process.env.RENDER_EXTERNAL_URL || "";
-if (RENDER_URL) {
-  setInterval(() => {
-    https.get(RENDER_URL + "/api/health", (r) => {
-      console.log("Keep-alive:", r.statusCode);
-    }).on("error", (e) => console.log("Keep-alive err:", e.message));
-  }, 14 * 60 * 1000);
-}
+// ─── KEEP-ALIVE (evita adormirea pe Render) ───────────────────────────────────
+const BACKEND_URL = process.env.RENDER_EXTERNAL_URL || "https://melio-backend.onrender.com";
+setInterval(async () => {
+  try {
+    const https = require("https");
+    https.get(`${BACKEND_URL}/api/health`, res => {
+      console.log("🏓 Keep-alive ping:", res.statusCode);
+    }).on("error", err => {
+      console.warn("⚠️ Keep-alive failed:", err.message);
+    });
+  } catch (e) {}
+}, 14 * 60 * 1000); // la 14 minute
 
-// ── START ─────────────────────────────────────────────────
-const PORT = process.env.PORT || 3001;
+// ─── START ─────────────────────────────────────────────────────────────────────
+const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`✅ Melio API pornit pe http://localhost:${PORT}`);
-  console.log(`   Anthropic key: ${process.env.ANTHROPIC_API_KEY ? "✓ configurată" : "✗ LIPSĂ"}`);
-  console.log(`   Endpoints disponibile:`);
-  console.log(`   GET  /api/health`);
-  console.log(`   POST /api/retete`);
-  console.log(`   POST /api/analizeaza-bon`);
-  console.log(`   POST /api/citeste-expirare`);
+  console.log(`🚀 Melio backend pornit pe portul ${PORT}`);
+  console.log(`📦 Cache retete: activ (24h TTL)`);
+  console.log(`🛡️  Rate limit: ${RATE_LIMIT} cereri/ora/IP`);
+  console.log(`🖼️  Sharp: conversie automata HEIC/HEIF → JPEG activa`);
 });
