@@ -165,11 +165,22 @@ app.post("/api/analizeaza-bon", rateLimit, upload.single("bon"), async (req, res
     const originalBuffer = req.file.buffer;
     const originalMime = req.file.mimetype;
 
-    const PROMPT_BON = `Ești un asistent care analizează bonuri fiscale românești.
-Citește FIECARE linie din acest bon și extrage DOAR produsele alimentare.
-Ignoră: servicii, taxe, TVA, totaluri, date, ora, CIF, număr bon, produse non-alimentare (detergenți, cosmetice, haine).
-Corectează abrevierile tipice de pe bonuri românești (ex: "UNT" → "unt", "PAINE" → "pâine").
-Răspunde DOAR cu JSON valid:
+    const PROMPT_BON = `Ești un expert în analiza bonurilor fiscale românești.
+Sarcina ta: extrage DOAR produsele alimentare comestibile din acest bon.
+
+REGULI STRICTE:
+1. Incluде DOAR alimente și băuturi (ce se mănâncă sau bea)
+2. Exclude ABSOLUT orice altceva: îmbrăcăminte, încălțăminte, textile (papuci, șosete, tricouri etc.), detergenți, cosmetice, medicamente, materiale, electrice, pungi, ambalaje
+3. Dacă un produs are nume de brand, identifică ce este și incluде-l DOAR dacă e aliment:
+   - "Hellmann's" → "maioneză" ✅
+   - "Garlic Herb" → "condiment usturoi cu ierburi" ✅  
+   - "Ecolaxa", "Garantine", "Domestos", "Dero" → EXCLUDE ❌ (sunt detergenți/dezinfectanți)
+   - "Papuci", "Sandale", orice încălțăminte → EXCLUDE ❌
+4. Corectează abrevierile de pe bonuri: "UNT" → "unt", "PAINE" → "pâine", "LACT" → "lactate"
+5. Scrie numele în română, clar și complet (nu prescurtat)
+6. Emoji relevant pentru fiecare aliment
+
+Răspunde DOAR cu JSON valid, fără text înainte sau după:
 {"produse": [{"nume": "...", "emoji": "..."}]}`;
 
     // ── PDF ──
