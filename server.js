@@ -136,7 +136,7 @@ Răspunde DOAR cu JSON valid, fără text înainte sau după:
 }`;
 
     const message = await client.messages.create({
-      model: "claude-sonnet-4-6",
+      model: "claude-haiku-4-5-20251001",
       max_tokens: 8000,
       messages: [{ role: "user", content: prompt }],
     });
@@ -195,7 +195,7 @@ Răspunde DOAR cu JSON valid, fără text înainte sau după:
     if (isPDF) {
       const base64PDF = originalBuffer.toString("base64");
       const message = await client.messages.create({
-        model: "claude-sonnet-4-6",
+        model: "claude-haiku-4-5-202510016",
         max_tokens: 800,
         messages: [{
           role: "user",
