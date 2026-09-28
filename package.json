@@ -9,14 +9,24 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
+    "@capacitor-community/admob": "^8.1.0",
+    "@capacitor/ios": "^8.5.0",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.19.2",
     "heic-convert": "^2.1.0",
     "multer": "^1.4.5-lts.1",
-    "sharp": "^0.35.2"
+    "sharp": "^0.35.2",
+    "@capacitor/android": "^8.4.0",
+    "@capacitor/browser": "^8.0.3",
+    "@capacitor/local-notifications": "^8.2.0",
+    "@supabase/supabase-js": "^2.45.4",
+    "firebase-admin": "^12.6.0",
+    "@capacitor/push-notifications": "^8.0.3"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.5.0",
+    "@capacitor/core": "^8.5.0",
     "nodemon": "^3.1.0"
   }
 }

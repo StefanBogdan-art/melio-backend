@@ -86,7 +86,7 @@ app.get("/api/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// ─── POST /api/retete (Sonnet - calitate maxima) ───────────────────────────────
+// ─── POST /api/retete (Haiku - rapid) ───────────────────────────────
 app.post("/api/retete", rateLimit, async (req, res) => {
   try {
     const { ingrediente, force_new } = req.body;
@@ -106,7 +106,7 @@ app.post("/api/retete", rateLimit, async (req, res) => {
 
     const prompt = `Ești chef culinar român cu experiență în nutriție. Utilizatorul are aceste ingrediente disponibile: ${ingrediente.join(", ")}.
 
-Generează 10 rețete REALE și gustoase respectând aceste reguli:
+Generează 6 rețete REALE și gustoase respectând aceste reguli:
 - Prioritizează combinații compatibile și logice din punct de vedere culinar
 - Nu forța toate ingredientele într-o singură rețetă dacă nu se potrivesc
 - Dacă unele ingrediente par incompatibile (ex: pepene cu muștar, fructe cu condimente savuroase), folosește-le în rețete separate, nu împreună
@@ -114,6 +114,7 @@ Generează 10 rețete REALE și gustoase respectând aceste reguli:
 - Corectează greșelile de scriere din lista de ingrediente
 - Valorile nutritive (calorii, proteine, carbohidrați, grăsimi) trebuie să fie REALE și calculate corect per porție
 - La final adaugă câmpul "sugestie_completare" cu ce ingredient comun ar completa cel mai bine combinația
+- Fii concis: maxim 5 pași per rețetă, fiecare pas o singură frază scurtă (sub 15 cuvinte)
 
 Răspunde DOAR cu JSON valid, fără text înainte sau după:
 {
@@ -137,7 +138,7 @@ Răspunde DOAR cu JSON valid, fără text înainte sau după:
 
     const message = await client.messages.create({
       model: "claude-haiku-4-5-20251001",
-      max_tokens: 8000,
+      max_tokens: 4500,
       messages: [{ role: "user", content: prompt }],
     });
 
@@ -148,7 +149,7 @@ Răspunde DOAR cu JSON valid, fără text înainte sau după:
 
     const parsed = JSON.parse(text.substring(firstBrace, lastBrace + 1));
     retetCache.set(cacheKey, { data: parsed, expiresAt: Date.now() + CACHE_TTL });
-    console.log("✅ /api/retete generat (Sonnet):", ingrediente.length, "ingrediente, cacheat 7 zile");
+    console.log("✅ /api/retete generat (Haiku):", ingrediente.length, "ingrediente, cacheat 7 zile");
 
     res.json(parsed);
   } catch (err) {
@@ -250,6 +251,9 @@ Răspunde DOAR cu JSON valid, fără text înainte sau după:
   }
 });
 
+// ─── FRIGIDER FAMILIAR (households, shopping list, chat) ──────────────────────
+app.use('/api/family', require('./family'));
+
 // ─── KEEP-ALIVE (evita adormirea pe Render) ───────────────────────────────────
 const BACKEND_URL = process.env.RENDER_EXTERNAL_URL || "https://melio-backend.onrender.com";
 setInterval(() => {
@@ -271,5 +275,5 @@ app.listen(PORT, () => {
   console.log(`🛡️  Rate limit: ${RATE_LIMIT} cereri/ora/IP`);
   console.log(`🖼️  Bon imagine: Haiku + sharp + heic-convert`);
   console.log(`📄 Bon PDF: Sonnet`);
-  console.log(`🍳 Retete: Sonnet (calitate maxima)`);
+  console.log(`🍳 Retete: Haiku (6 retete, rapid)`);
 });
