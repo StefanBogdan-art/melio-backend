@@ -63,8 +63,8 @@ async function notifyOthers(householdId, senderName, title, body) {
       notification: { title, body },
       android: {
         notification: {
-          channelId: 'melio',
-          sound: 'melio_notif',
+          channelId: 'melio_v2',
+          sound: 'melio_chime',
           priority: 'high'
         }
       },
@@ -228,7 +228,7 @@ router.post('/:id/shopping', async (req, res) => {
 // ════════════════════════════════════════════════════════════════
 router.patch('/:id/shopping/:itemId', async (req, res) => {
   try {
-    const { checked, checked_by, name, emoji, quantity } = req.body;
+    const { checked, checked_by, name, emoji, quantity, later } = req.body;
     const updates = {};
 
     if (typeof checked !== 'undefined') {
@@ -236,6 +236,7 @@ router.patch('/:id/shopping/:itemId', async (req, res) => {
       updates.checked_by = checked ? (checked_by || null) : null;
       updates.checked_at = checked ? new Date().toISOString() : null;
     }
+    if (typeof later !== 'undefined') updates.later = !!later;
     if (name)     updates.name     = name;
     if (emoji)    updates.emoji    = emoji;
     if (quantity) updates.quantity = quantity;

@@ -89,11 +89,12 @@ app.get("/api/health", (req, res) => {
 // ─── POST /api/retete (Haiku - rapid) ───────────────────────────────
 app.post("/api/retete", rateLimit, async (req, res) => {
   try {
-    const { ingrediente, force_new } = req.body;
+    const { ingrediente, force_new, lang } = req.body;
+    const en = lang === 'en';
     if (!ingrediente || !ingrediente.length)
       return res.status(400).json({ error: "Lista ingrediente lipsă." });
 
-    const cacheKey = getCacheKey(ingrediente);
+    const cacheKey = getCacheKey(ingrediente) + (en ? ':en' : '');
     if (!force_new && retetCache.has(cacheKey)) {
       const cached = retetCache.get(cacheKey);
       if (Date.now() < cached.expiresAt) {
@@ -105,6 +106,7 @@ app.post("/api/retete", rateLimit, async (req, res) => {
     }
 
     const prompt = `Ești chef culinar român cu experiență în nutriție. Utilizatorul are aceste ingrediente disponibile: ${ingrediente.join(", ")}.
+${en ? 'IMPORTANT: Write ALL text values in the JSON (recipe names, ingredients, steps, time, difficulty, corrected names, suggestion) in English. Keep the JSON keys exactly as shown.' : ''}
 
 Generează 6 rețete REALE și gustoase respectând aceste reguli:
 - Prioritizează combinații compatibile și logice din punct de vedere culinar
