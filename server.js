@@ -7,15 +7,15 @@ require("dotenv").config();
 
 const app = express();
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 10 * 1024 * 1024 } });
-const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY });
+const client = new Anthropic({ apiKey: process.env.ANTHROPIC_API_KEY, timeout: 60_000, maxRetries: 1 });
 
 app.use(cors());
-app.use(express.json({ limit: "10mb" }));
+app.use(express.json({ limit: "100kb" }));
 
 // ─── LOGGING IP ────────────────────────────────────────────────────────────────
 app.use((req, res, next) => {
   const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress;
-  console.log(`📡 ${new Date().toISOString()} | ${req.method} ${req.path} | IP: ${ip}`);
+  console.log(`📡 ${new Date().toISOString()} | ${req.method} ${req.path} | IP: ${ip} | RL-IP: ${clientIp(req)}`);
   next();
 });
 
@@ -24,8 +24,13 @@ const requestCounts = {};
 const RATE_LIMIT = 30;
 const RATE_WINDOW = 60 * 60 * 1000;
 
+function clientIp(req) {
+  const xff = (req.headers["x-forwarded-for"] || "").split(",").map(s => s.trim()).filter(Boolean);
+  return xff[xff.length - 1] || req.socket.remoteAddress || "unknown";
+}
+
 function rateLimit(req, res, next) {
-  const ip = req.headers["x-forwarded-for"]?.split(",")[0] || req.socket.remoteAddress || "unknown";
+  const ip = clientIp(req);
   const now = Date.now();
   if (!requestCounts[ip] || now > requestCounts[ip].resetAt) {
     requestCounts[ip] = { count: 0, resetAt: now + RATE_WINDOW };
@@ -91,8 +96,10 @@ app.post("/api/retete", rateLimit, async (req, res) => {
   try {
     const { ingrediente, force_new, lang } = req.body;
     const en = lang === 'en';
-    if (!ingrediente || !ingrediente.length)
+    if (!Array.isArray(ingrediente) || !ingrediente.length)
       return res.status(400).json({ error: "Lista ingrediente lipsă." });
+    if (ingrediente.length > 60 || !ingrediente.every(i => typeof i === "string" && i.trim() && i.length <= 80))
+      return res.status(400).json({ error: "Lista ingrediente invalidă." });
 
     const cacheKey = getCacheKey(ingrediente) + (en ? ':en' : '');
     if (!force_new && retetCache.has(cacheKey)) {
@@ -150,6 +157,7 @@ Răspunde DOAR cu JSON valid, fără text înainte sau după:
     if (firstBrace === -1 || lastBrace === -1) throw new Error("Răspuns invalid de la AI.");
 
     const parsed = JSON.parse(text.substring(firstBrace, lastBrace + 1));
+    if (!Array.isArray(parsed.retete) || !parsed.retete.length) throw new Error("Răspuns invalid de la AI.");
     retetCache.set(cacheKey, { data: parsed, expiresAt: Date.now() + CACHE_TTL });
     console.log("✅ /api/retete generat (Haiku):", ingrediente.length, "ingrediente, cacheat 7 zile");
 
@@ -161,7 +169,15 @@ Răspunde DOAR cu JSON valid, fără text înainte sau după:
 });
 
 // ─── POST /api/analizeaza-bon ──────────────────────────────────────────────────
-app.post("/api/analizeaza-bon", rateLimit, upload.single("bon"), async (req, res) => {
+function uploadBon(req, res, next) {
+  upload.single("bon")(req, res, err => {
+    if (!err) return next();
+    if (err.code === "LIMIT_FILE_SIZE") return res.status(413).json({ error: "Imaginea e prea mare (max 10 MB)." });
+    return res.status(400).json({ error: "Fișier invalid." });
+  });
+}
+
+app.post("/api/analizeaza-bon", rateLimit, uploadBon, async (req, res) => {
   try {
     if (!req.file) return res.status(400).json({ error: "Nicio imagine trimisă." });
 
@@ -254,6 +270,14 @@ Răspunde DOAR cu JSON valid, fără text înainte sau după:
 });
 
 // ─── FRIGIDER FAMILIAR (households, shopping list, chat) ──────────────────────
+const joinAttempts = {};
+app.use("/api/family/join", (req, res, next) => {
+  const ip = clientIp(req), now = Date.now();
+  if (!joinAttempts[ip] || now > joinAttempts[ip].resetAt) joinAttempts[ip] = { count: 0, resetAt: now + 15 * 60 * 1000 };
+  if (++joinAttempts[ip].count > 10) return res.status(429).json({ error: "Prea multe încercări. Încearcă peste 15 minute." });
+  next();
+});
+setInterval(() => { const now = Date.now(); for (const k in joinAttempts) if (now > joinAttempts[k].resetAt) delete joinAttempts[k]; }, 15 * 60 * 1000);
 app.use('/api/family', require('./family'));
 
 // ─── KEEP-ALIVE (evita adormirea pe Render) ───────────────────────────────────

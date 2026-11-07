@@ -72,13 +72,14 @@ BEGIN
   END IF;
 END $$;
 
--- ── 7. Row Level Security (RLS) — dezactivat pentru simplitate ──
--- Securitatea e gestionată prin service_key pe backend
--- (nu expunem cheile în frontend pentru operații de scriere)
-ALTER TABLE households        DISABLE ROW LEVEL SECURITY;
-ALTER TABLE household_members DISABLE ROW LEVEL SECURITY;
-ALTER TABLE shopping_items    DISABLE ROW LEVEL SECURITY;
-ALTER TABLE chat_messages     DISABLE ROW LEVEL SECURITY;
+-- ── 7. Row Level Security (RLS) — ACTIVAT, fără politici pentru anon ──
+-- Cheia anon e în APK, deci fără RLS oricine poate citi/șterge tot.
+-- Backend-ul folosește service_key, care ocolește RLS → aplicația merge la fel.
+-- Realtime nu mai livrează schimbări către anon; aplicația are polling la 6s.
+ALTER TABLE households        ENABLE ROW LEVEL SECURITY;
+ALTER TABLE household_members ENABLE ROW LEVEL SECURITY;
+ALTER TABLE shopping_items    ENABLE ROW LEVEL SECURITY;
+ALTER TABLE chat_messages     ENABLE ROW LEVEL SECURITY;
 
 -- ── Verificare ──────────────────────────────────────────────────
 SELECT 'Schema Melio Frigider instalată cu succes! ✅' AS status;
