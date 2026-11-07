@@ -24,7 +24,11 @@ const requestCounts = {};
 const RATE_LIMIT = 30;
 const RATE_WINDOW = 60 * 60 * 1000;
 
+// Render sits behind Cloudflare: the rightmost X-Forwarded-For entry is a Cloudflare edge IP
+// shared by many users. Cloudflare overwrites CF-Connecting-IP with the real client IP.
 function clientIp(req) {
+  const cf = req.headers["cf-connecting-ip"];
+  if (cf) return String(cf).trim();
   const xff = (req.headers["x-forwarded-for"] || "").split(",").map(s => s.trim()).filter(Boolean);
   return xff[xff.length - 1] || req.socket.remoteAddress || "unknown";
 }
