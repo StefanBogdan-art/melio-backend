@@ -3607,5 +3607,14 @@ document.addEventListener('visibilitychange', function () {
 })(); // end IIFE
 </script>
 
+<script>
+// Warm up the Render server at app start (free tier cold start can take 30-60s),
+// so receipt scanning does not hit a sleeping server. Fire-and-forget.
+(function () {
+  try {
+    fetch(API_BASE + '/api/health', { cache: 'no-store', signal: AbortSignal.timeout(65000) }).catch(function () {});
+  } catch (e) {}
+})();
+</script>
 </body>
 </html>

@@ -33,8 +33,20 @@ function clientIp(req) {
   return xff[xff.length - 1] || req.socket.remoteAddress || "unknown";
 }
 
+// Global daily cap on AI routes: hard ceiling on API spend even if many IPs are used.
+// Resets on server restart/redeploy; override with env DAILY_AI_CAP.
+const DAILY_AI_CAP = parseInt(process.env.DAILY_AI_CAP, 10) || 500;
+let dailyCount = 0;
+let dailyResetAt = Date.now() + 24 * 60 * 60 * 1000;
+
 function rateLimit(req, res, next) {
   const ip = clientIp(req);
+  if (Date.now() > dailyResetAt) { dailyCount = 0; dailyResetAt = Date.now() + 24 * 60 * 60 * 1000; }
+  if (dailyCount >= DAILY_AI_CAP) {
+    console.warn("⛔ Daily AI cap reached:", DAILY_AI_CAP);
+    return res.status(429).json({ error: "Serviciul este aglomerat astăzi. Încearcă din nou mâine." });
+  }
+  dailyCount++;
   const now = Date.now();
   if (!requestCounts[ip] || now > requestCounts[ip].resetAt) {
     requestCounts[ip] = { count: 0, resetAt: now + RATE_WINDOW };
