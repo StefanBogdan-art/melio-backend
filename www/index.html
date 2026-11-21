@@ -263,6 +263,20 @@
     .pr-icon.g{background:var(--green-lt)}.pr-icon.o{background:var(--orange-lt)}.pr-icon.p{background:var(--purple-lt)}
     .prof-row>span{font-size:14px;color:var(--text);flex:1}
   </style>
+<script>
+// iOS preparation: AbortSignal.timeout polyfill (iOS 15), platform flag, hide mock ad strips on iOS
+(function () {
+  if (typeof AbortSignal !== 'undefined' && !AbortSignal.timeout) {
+    AbortSignal.timeout = function (ms) { var c = new AbortController(); setTimeout(function () { c.abort(); }, ms); return c.signal; };
+  }
+  window._melioIOS = !!(window.Capacitor && Capacitor.getPlatform && Capacitor.getPlatform() === 'ios');
+  if (window._melioIOS) {
+    document.documentElement.classList.add('plat-ios');
+    var st = document.createElement('style'); st.textContent = '.plat-ios .admob{display:none!important}';
+    document.head.appendChild(st);
+  }
+})();
+</script>
 </head>
 <body>
 
@@ -418,10 +432,10 @@
 
       <div id="last-scan-banner" style="display:none;background:var(--bg2);border-radius:var(--rsm);padding:14px;margin-bottom:14px;border:1px solid var(--border)">
         <div style="font-size:13px;color:var(--text2);margin-bottom:8px">
-          📋 <strong style="color:var(--text)">Ultima scanare:</strong> <span id="last-scan-info"></span>
+          📋 <strong style="color:var(--text)" data-i18n="last_scan">Ultima scanare:</strong> <span id="last-scan-info"></span>
         </div>
         <div id="last-scan-foods" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px"></div>
-        <button onclick="useLastScan()" style="width:100%;background:#111;color:#fff;border:none;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:600;cursor:pointer">
+        <button onclick="useLastScan()" data-i18n="use_ingredients" style="width:100%;background:#111;color:#fff;border:none;border-radius:8px;padding:10px 14px;font-size:13px;font-weight:600;cursor:pointer">
           Folosește aceste ingrediente →
         </button>
       </div>
@@ -439,7 +453,7 @@
       <button class="add-ingredient-btn" onclick="addManualRow()">
         <span class="plus-icon">+</span>Adaugă alt ingredient
       </button>
-      <button class="btn btn-green" onclick="runManualAI()">Continuă →</button>
+      <button class="btn btn-green" onclick="runManualAI()" data-i18n="continue_arrow">Continuă →</button>
     </div>
   </div>
   <div class="bnav">
@@ -690,7 +704,7 @@ var _T = {
     expiry_alerts:'Alerte expirare', see_all:'Vezi toate',
     how_add_receipt:'Cum vrei să adaugi bonul?', add_manually:'Adaugă manual',
     camera:'Camera', gallery:'Galerie', digital_receipt:'Bon digital',
-    receipt_selected:'Bon selectat', last_scan:'Ultima scanare:',
+    receipt_selected:'Bon selectat', last_scan:'Ultima scanare:', scan_manual:'Manual', scan_photo:'Bon fotografiat', scan_digital:'Bon digital', product_one:'produs', product_many:'produse',
     use_ingredients:'Folosește aceste ingrediente →',
     analyze_ai:'✨ Analizează cu AI',
     or_manual_tab:'Sau folosește tab-ul "Adaugă manual" pentru produse individuale',
@@ -787,7 +801,7 @@ var _T = {
     expiry_alerts:'Expiry alerts', see_all:'See all',
     how_add_receipt:'How do you want to add your receipt?', add_manually:'Add manually',
     camera:'Camera', gallery:'Gallery', digital_receipt:'Digital receipt',
-    receipt_selected:'Receipt selected', last_scan:'Last scan:',
+    receipt_selected:'Receipt selected', last_scan:'Last scan:', scan_manual:'Manual', scan_photo:'Photographed receipt', scan_digital:'Digital receipt', product_one:'product', product_many:'products',
     use_ingredients:'Use these ingredients →',
     analyze_ai:'✨ Analyze with AI',
     or_manual_tab:'Or use the "Add manually" tab for individual products',
@@ -1058,9 +1072,16 @@ window.translateApp = function() {
   var darkLbl = document.getElementById('dark-label');
   if (darkLbl) darkLbl.textContent = t('dark_mode');
 
+  // Generic hook: any element with data-i18n="key" follows the language
+  document.querySelectorAll('[data-i18n]').forEach(function(el) { el.textContent = t(el.getAttribute('data-i18n')); });
+  // Result title: only replace it while it still shows the default title (dynamic titles are set per flow)
+  var rt = document.getElementById('result-title');
+  if (rt && (rt.textContent === _T.ro.your_recipes || rt.textContent === _T.en.your_recipes)) rt.textContent = t('your_recipes');
+
   // Re-render dynamic lists so they pick up the new language
   if (typeof renderFridge === 'function') renderFridge();
   if (typeof renderHomeExpiry === 'function') renderHomeExpiry();
+  if (typeof updateLastScanBanner === 'function') updateLastScanBanner();
 };
 
 function toggleLanguage() {
@@ -1301,7 +1322,7 @@ function updateLastScanBanner() {
   if (!data || !data.foods || !data.foods.length) { if(b) b.style.display='none'; return; }
   if (b) b.style.display = 'block';
   var infoEl = document.getElementById('last-scan-info');
-  if (infoEl) infoEl.textContent = (data.storeName||'Bon') + ' · ' + (data.date||'') + ' · ' + data.foods.length + ' produse';
+  if (infoEl) infoEl.textContent = (t({'Manual':'scan_manual','Bon fotografiat':'scan_photo','Bon digital':'scan_digital'}[data.storeName] || 'scan_photo') ) + ' · ' + (data.date||'') + ' · ' + data.foods.length + ' ' + t(data.foods.length === 1 ? 'product_one' : 'product_many');
   var foodsEl = document.getElementById('last-scan-foods');
   if (foodsEl) foodsEl.innerHTML = data.foods.map(function(f){ return '<span style="background:#fff;border:0.5px solid rgba(29,185,84,.3);border-radius:999px;padding:4px 10px;font-size:12px;color:var(--green2)">' + (f.e||'🥗') + ' ' + escHtml(f.n) + '</span>'; }).join('');
 }
@@ -1324,7 +1345,7 @@ function buildConfirm(foods) {
       '<div style="display:flex;align-items:center;gap:6px">' +
       '<div class="fci-dur">' +
       '<button class="dur-btn" onclick="adj(\'' + f.k + '\',-1)">−</button>' +
-      '<span class="dur-val" id="dv-' + f.k + '">' + durations[f.k] + ' zile</span>' +
+      '<span class="dur-val" id="dv-' + f.k + '">' + durations[f.k] + ' ' + t('days_word') + '</span>' +
       '<button class="dur-btn" onclick="adj(\'' + f.k + '\',+1)">+</button>' +
       '</div>' +
       '<button onclick="removeConfirmItem(\'' + f.k + '\')" style="background:none;border:none;color:#ff4444;font-size:20px;cursor:pointer;padding:0 4px;line-height:1;font-weight:bold">✕</button>' +
@@ -1343,7 +1364,7 @@ function removeConfirmItem(k) {
 
 function adj(k, d) {
   durations[k] = Math.max(0, Math.min(60, durations[k]+d));
-  document.getElementById('dv-'+k).textContent = durations[k] + ' zile';
+  document.getElementById('dv-'+k).textContent = durations[k] + ' ' + t('days_word');
   document.getElementById('db-'+k).style.width = Math.min(100,Math.round(durations[k]/14*100)) + '%';
 }
 
@@ -1642,7 +1663,7 @@ function renderFridge() {
   document.getElementById('urgent-count').textContent = urgent;
   document.getElementById('total-count').textContent = fridgeItems.length;
   document.getElementById('prof-alerte').textContent = urgent;
-  document.getElementById('urgent-home').textContent = urgent>0 ? urgent+' '+(_lang==='en'?'urgent items':'produse urgente') : t('your_items');
+  document.getElementById('urgent-home').textContent = urgent>0 ? urgent+' '+(_lang==='en'?(urgent===1?'urgent item':'urgent items'):(urgent===1?'produs urgent':'produse urgente')) : t('your_items');
   document.getElementById('urgent-recipes-btn').style.display = fridgeItems.length > 0 ? 'flex' : 'none';
   document.getElementById('notif-dot').style.display = urgent>0 ? 'block' : 'none';
   renderNotifFeed(sorted, today);
@@ -1719,7 +1740,7 @@ window.showUrgentRecipes = function(forceNew) {
       banner.style.color='var(--green2)';
       banner.style.padding='12px 14px';
     }
-    document.getElementById('ing-list').innerHTML = foods.map(function(f){return '<span class="ing">'+(f.e||'🥗')+' '+f.n+'</span>';}).join('');
+    document.getElementById('ing-list').innerHTML = foods.map(function(f){return '<span class="ing">'+(f.e||'🥗')+' '+escHtml(f.n)+'</span>';}).join('');
     window._showRecipes(cached, foods);
     return;
   }
@@ -1759,7 +1780,7 @@ window._deschideSelector = function() {
       var d = Math.round((new Date(it.expDate)-today)/86400000);
       return '<div onclick="window._toggleExtra(this,' + i + ')" style="display:flex;align-items:center;gap:10px;padding:11px 12px;background:var(--bg2);border-radius:var(--rsm);margin-bottom:8px;cursor:pointer;border:1.5px solid transparent">' +
         '<div id="xc-' + i + '" style="width:22px;height:22px;border-radius:50%;border:2px solid var(--border);background:#fff;flex-shrink:0;display:flex;align-items:center;justify-content:center"></div>' +
-        '<div style="flex:1"><strong style="font-size:14px">' + escHtml(it.name) + '</strong><span style="font-size:12px;color:var(--text2);display:block">' + d + ' zile</span></div>' +
+        '<div style="flex:1"><strong style="font-size:14px">' + escHtml(it.name) + '</strong><span style="font-size:12px;color:var(--text2);display:block">' + d + ' ' + t('days_word') + '</span></div>' +
         '<span style="font-size:20px">' + getEmoji(it.name) + '</span></div>';
     }).join('') : '';
 
@@ -1844,7 +1865,7 @@ function dismissPush() { document.getElementById('push-notif').classList.remove(
 // Canalul e versionat (_v2): sunetul unui canal Android nu se mai poate schimba după creare.
 var NOTIF_CHANNEL = 'melio_v2';
 var NOTIF_SOUND = 'melio_chime';
-var NOTIF_MAX = 450; // limită de siguranță pentru alarmele programate
+var NOTIF_MAX = window._melioIOS ? 60 : 450; // limită de siguranță pentru alarmele programate (iOS păstrează max 64)
 var NOTIF_SLOTS = [  // d = zile față de expirare
   {d: -3, h: 8,  m: 0,  k: 'd3'},
   {d: -1, h: 18, m: 0,  k: 'd1'},
@@ -1883,7 +1904,7 @@ function buildExpiryNotifs() {
   });
   plan.sort(function(a, b) { return a.at - b.at; });
   return plan.slice(0, NOTIF_MAX).map(function(n, i) {
-    return {id: 3000 + i, channelId: NOTIF_CHANNEL, title: n.title, body: n.body, schedule: {at: n.at, allowWhileIdle: true}, autoCancel: true};
+    return {id: 3000 + i, channelId: NOTIF_CHANNEL, title: n.title, body: n.body, schedule: {at: n.at, allowWhileIdle: true}, autoCancel: true, sound: window._melioIOS ? 'melio_chime.wav' : undefined};
   });
 }
 
@@ -1905,6 +1926,9 @@ async function scheduleNotifs() {
 
 var _origSaveFridge = saveFridge;
 saveFridge = function() { _origSaveFridge(); scheduleNotifs(); };
+// Notifications modal handlers (were referenced in the markup but never defined -> ReferenceError)
+function requestNotifPermission() { return scheduleNotifs(); }
+function scheduleDailyRecipe() {} // toggle is decorative for now (see docs/review-2026-10-17.md)
 
 var _taps=0, _tapT=null;
 
@@ -1927,7 +1951,7 @@ var _taps=0, _tapT=null;
       _taps++;
       clearTimeout(_tapT);
       _tapT = setTimeout(function(){_taps=0;}, 2000);
-      if (_taps>=5) {
+      if (_taps>=5 && !window._melioIOS) {
         _taps=0;
         var nou = prompt('IP server:\nCurent: '+API_BASE, API_BASE);
         if (nou&&nou.trim()) {
@@ -2438,10 +2462,16 @@ console.log('[Melio] Selector complet v2 activ');
 var ADMOB_APP_ID = 'ca-app-pub-2341403641602879~7435945926';
 var ADMOB_BANNER_ID = 'ca-app-pub-2341403641602879/1992047557';
 var ADMOB_BANNER_TEST = 'ca-app-pub-3940256099942544/6300978111';
+// iOS needs its own AdMob app + banner ids (Android ids are invalid there). Empty = no ads on iOS yet.
+var ADMOB_BANNER_ID_IOS = '';
 
 async function initAdMob() {
   if (typeof Capacitor === 'undefined' || !Capacitor.isNativePlatform()) {
     console.log('[AdMob] Nu e pe telefon - skip');
+    return;
+  }
+  if (window._melioIOS && !ADMOB_BANNER_ID_IOS) {
+    console.log('[AdMob] iOS fara ID - skip');
     return;
   }
 
@@ -2469,7 +2499,7 @@ async function showBanner() {
     var { AdMob, BannerAdSize, BannerAdPosition } = window.Capacitor.Plugins;
 
     var options = {
-      adId: ADMOB_BANNER_ID,
+      adId: window._melioIOS ? ADMOB_BANNER_ID_IOS : ADMOB_BANNER_ID,
       adSize: 'BANNER',
       position: 'BOTTOM_CENTER',
       margin: 0,

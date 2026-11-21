@@ -77,7 +77,8 @@ function getCacheKey(ingrediente) {
 async function convertToJpeg(buffer, originalMime) {
   // Incercam sharp mai intai
   try {
-    const result = await sharp(buffer).jpeg({ quality: 85 }).toBuffer();
+    // rotate() applies EXIF orientation (sideways iPhone photos); resize caps huge photos
+    const result = await sharp(buffer).rotate().resize({ width: 2000, height: 2000, fit: "inside", withoutEnlargement: true }).jpeg({ quality: 85 }).toBuffer();
     console.log("✅ Sharp: convertit", originalMime, "→ JPEG");
     return result;
   } catch (sharpErr) {
@@ -204,9 +205,9 @@ app.post("/api/analizeaza-bon", rateLimit, uploadBon, async (req, res) => {
 Sarcina ta: extrage DOAR produsele alimentare comestibile din acest bon.
 
 REGULI STRICTE:
-1. Incluде DOAR alimente și băuturi (ce se mănâncă sau bea)
+1. Include DOAR alimente și băuturi (ce se mănâncă sau bea)
 2. Exclude ABSOLUT orice altceva: îmbrăcăminte, încălțăminte, textile (papuci, șosete, tricouri etc.), detergenți, cosmetice, medicamente, materiale, electrice, pungi, ambalaje
-3. Dacă un produs are nume de brand, identifică ce este și incluде-l DOAR dacă e aliment:
+3. Dacă un produs are nume de brand, identifică ce este și include-l DOAR dacă e aliment:
    - "Hellmann's" → "maioneză" ✅
    - "Garlic Herb" → "condiment usturoi cu ierburi" ✅  
    - "Ecolaxa", "Garantine", "Domestos", "Dero" → EXCLUDE ❌ (sunt detergenți/dezinfectanți)
@@ -242,7 +243,7 @@ Răspunde DOAR cu JSON valid, fără text înainte sau după:
       });
       const text = message.content.map(b => b.text || "").join("");
       const parsed = JSON.parse(text.substring(text.indexOf("{"), text.lastIndexOf("}") + 1));
-      console.log("✅ /api/analizeaza-bon PDF (Sonnet):", parsed.produse?.length || 0, "produse");
+      console.log("✅ /api/analizeaza-bon PDF (Haiku):", parsed.produse?.length || 0, "produse");
       return res.json(parsed);
     }
 
@@ -316,6 +317,6 @@ app.listen(PORT, () => {
   console.log(`📦 Cache retete: 7 zile TTL`);
   console.log(`🛡️  Rate limit: ${RATE_LIMIT} cereri/ora/IP`);
   console.log(`🖼️  Bon imagine: Haiku + sharp + heic-convert`);
-  console.log(`📄 Bon PDF: Sonnet`);
+  console.log(`📄 Bon PDF: Haiku`);
   console.log(`🍳 Retete: Haiku (6 retete, rapid)`);
 });
